@@ -14,16 +14,16 @@ def extract_content(html: str, url: str, is_raw_html: bool = False) -> tuple[str
     for tag in soup.find_all(["script", "style", "nav", "footer", "iframe", "noscript"]):
         tag.decompose()
     
-    # 2. 移除常见广告/侧边栏
-    for cls in ["sidebar", "advertisement", "ad-", "recommend", "related-posts", "comment", "share-bar"]:
-        for tag in soup.find_all(class_=re.compile(cls, re.I)):
+    # 2. 移除常见广告/侧边栏（使用单词边界避免误杀）
+    for cls in ["sidebar", "advertisement", "ad-", "recommend", "related-posts", "share-bar"]:
+        for tag in soup.find_all(class_=re.compile(rf"\b{cls}", re.I)):
             tag.decompose()
     
     # 3. 提取标题
     title = ""
     if soup.title:
         title = soup.title.get_text(strip=True)
-        # 清理标题后缀
+        # 清理标题后缀（| 需要转义）
         title = re.sub(r'\s*[-–|]\s*(知乎|CSDN|博客园|掘金|简书|V2EX|Medium|Dev\.to).*$', '', title)
     
     # 4. 平台特化提取

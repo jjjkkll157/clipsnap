@@ -7,21 +7,22 @@ def html_to_markdown(html: str) -> str:
     """将 HTML 转为干净的 Markdown"""
     soup = BeautifulSoup(html, "lxml")
 
-    # 预处理：代码块
+    # 预处理：代码块（必须在 code 处理之前，且用 replace_with 移除整个 pre）
     for pre in soup.find_all("pre"):
         code = pre.get_text()
         lang = ""
-        if pre.find("code") and pre.find("code").get("class"):
-            classes = pre.find("code").get("class")
-            for c in classes:
+        code_el = pre.find("code")
+        if code_el and code_el.get("class"):
+            for c in code_el.get("class"):
                 if c.startswith("language-") or c.startswith("lang-"):
                     lang = c.split("-", 1)[1]
                     break
         pre.replace_with(f"\n```{lang}\n{code}\n```\n")
 
-    # 预处理：行内代码
+    # 预处理：行内代码（跳过 pre 的子孙 — 已被 replace_with 移除，但以防万一）
     for code in soup.find_all("code"):
-        code.replace_with(f"`{code.get_text()}`")
+        if code.find_parent("pre") is None:
+            code.replace_with(f"`{code.get_text()}`")
 
     # 预处理：图片
     for img in soup.find_all("img"):

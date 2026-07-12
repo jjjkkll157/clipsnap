@@ -1,8 +1,9 @@
 """ClipSnap 后端 API 服务 — FastAPI"""
 import sqlite3
 import json
+import re
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
@@ -14,7 +15,23 @@ from extractor import extract_content
 from converter import html_to_markdown, markdown_to_wechat
 
 app = FastAPI(title="ClipSnap", version="1.0.0")
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["chrome-extension://*", "http://localhost:*", "http://127.0.0.1:*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# ── 工具函数 ──────────────────────────────────────────
+_CJK_RE = re.compile(r"[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff]")
+
+
+def count_words(text: str) -> int:
+    """中英文混合字数统计：CJK 字符按字计，拉丁文按词计"""
+    cjk = len(_CJK_RE.findall(text))
+    latin = len(re.sub(r"[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff]", " ", text).split())
+    return cjk + latin
+
 
 # ── 数据库 ──────────────────────────────────────────────
 DB_PATH = Path(__file__).parent / "clips.db"
@@ -24,6 +41,7 @@ def get_db():
     conn = sqlite3.connect(str(DB_PATH))
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=3000")
     return conn
 
 
@@ -41,37 +59,21 @@ def init_db():
                 created_at TEXT NOT NULL
             )
         """)
-        db.execute("""
-            CREATE TABLE IF NOT EXISTS api_keys (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                key TEXT UNIQUE NOT NULL,
-                name TEXT DEFAULT '',
-                created_at TEXT NOT NULL
-            )
-        """)
-        # 默认 API key
-        existing = db.execute("SELECT COUNT(*) FROM api_keys").fetchone()[0]
-        if existing == 0:
-            default_key = "clipsnap-" + str(uuid.uuid4())[:8]
-            db.execute(
-                "INSERT INTO api_keys (key, name, created_at) VALUES (?, ?, ?)",
-                (default_key, "default", datetime.utcnow().isoformat()),
-            )
-            db.commit()
-            print(f"🔑 默认 API Key: {default_key}")
+        db.commit()
 
 
 init_db()
 
 # ── 静态文件 ────────────────────────────────────────────
 WEB_DIR = Path(__file__).parent.parent / "web"
+_static_mounted = False
 if WEB_DIR.exists():
     app.mount("/static", StaticFiles(directory=str(WEB_DIR)), name="static")
+    _static_mounted = True
 
 
 @app.get("/", response_class=HTMLResponse)
 def dashboard():
-    """Web 管理面板"""
     web_index = WEB_DIR / "index.html"
     if web_index.exists():
         return web_index.read_text(encoding="utf-8")
@@ -96,57 +98,54 @@ async def clip_page(request: Request):
     raw_html = body.get("html", "")
     tags = body.get("tags", [])
 
-    if not url:
-        raise HTTPException(400, "url is required")
+    if not url or not url.startswith(("http://", "https://")):
+        raise HTTPException(400, "url is required and must start with http(s)://")
 
     # 提取内容
     if raw_html:
         title, content_html = extract_content(raw_html, url, is_raw_html=True)
     else:
         import httpx
-        async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
-            resp = await client.get(
-                url,
-                headers={
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-                },
-            )
-        title, content_html = extract_content(resp.text, url)
+        try:
+            async with httpx.AsyncClient(
+                timeout=15, follow_redirects=True,
+                headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+            ) as client:
+                resp = await client.get(url)
+                resp.raise_for_status()
+            title, content_html = extract_content(resp.text, url)
+        except httpx.HTTPStatusError as e:
+            raise HTTPException(502, f"目标网站返回错误: {e.response.status_code}")
+        except httpx.RequestError as e:
+            raise HTTPException(502, f"无法访问目标网站: {str(e)}")
+        except ImportError:
+            raise HTTPException(500, "httpx is not installed — run: pip install httpx")
 
     # 转 Markdown
     md = html_to_markdown(content_html)
+    wc = count_words(md)
 
     # 保存
     clip_id = str(uuid.uuid4())[:12]
+    now = datetime.now(timezone.utc).isoformat()
     with get_db() as db:
         db.execute(
             "INSERT INTO clips (id, url, title, content_md, source_html, word_count, tags, created_at) VALUES (?,?,?,?,?,?,?,?)",
-            (
-                clip_id,
-                url,
-                title,
-                md,
-                content_html,
-                len(md.split()),
-                json.dumps(tags, ensure_ascii=False),
-                datetime.utcnow().isoformat(),
-            ),
+            (clip_id, url, title, md, content_html, wc, json.dumps(tags, ensure_ascii=False), now),
         )
         db.commit()
 
-    return JSONResponse(
-        {
-            "ok": True,
-            "clip": {
-                "id": clip_id,
-                "url": url,
-                "title": title,
-                "content_md": md[:3000] + ("..." if len(md) > 3000 else ""),
-                "word_count": len(md.split()),
-                "tags": tags,
-            },
-        }
-    )
+    return JSONResponse({
+        "ok": True,
+        "clip": {
+            "id": clip_id,
+            "url": url,
+            "title": title,
+            "content_md": md[:3000] + ("..." if len(md) > 3000 else ""),
+            "word_count": wc,
+            "tags": tags,
+        },
+    })
 
 
 @app.get("/api/clips")
@@ -163,48 +162,42 @@ def list_clips(q: str = "", limit: int = 50, offset: int = 0):
                 "SELECT * FROM clips ORDER BY created_at DESC LIMIT ? OFFSET ?",
                 (limit, offset),
             ).fetchall()
-    return JSONResponse(
-        {
-            "clips": [
-                {
-                    "id": r["id"],
-                    "url": r["url"],
-                    "title": r["title"],
-                    "content_md": r["content_md"][:500] + ("..." if len(r["content_md"]) > 500 else ""),
-                    "word_count": r["word_count"],
-                    "tags": json.loads(r["tags"]),
-                    "created_at": r["created_at"],
-                }
-                for r in rows
-            ]
-        }
-    )
+    return JSONResponse({
+        "clips": [
+            {
+                "id": r["id"],
+                "url": r["url"],
+                "title": r["title"],
+                "content_md": r["content_md"][:500] + ("..." if len(r["content_md"]) > 500 else ""),
+                "word_count": r["word_count"],
+                "tags": json.loads(r["tags"]),
+                "created_at": r["created_at"],
+            }
+            for r in rows
+        ]
+    })
 
 
 @app.get("/api/clip/{clip_id}")
 def get_clip(clip_id: str):
-    """获取单个收藏的完整内容"""
     with get_db() as db:
         row = db.execute("SELECT * FROM clips WHERE id = ?", (clip_id,)).fetchone()
     if not row:
         raise HTTPException(404, "Clip not found")
-    return JSONResponse(
-        {
-            "id": row["id"],
-            "url": row["url"],
-            "title": row["title"],
-            "content_md": row["content_md"],
-            "source_html": row["source_html"],
-            "word_count": row["word_count"],
-            "tags": json.loads(row["tags"]),
-            "created_at": row["created_at"],
-        }
-    )
+    return JSONResponse({
+        "id": row["id"],
+        "url": row["url"],
+        "title": row["title"],
+        "content_md": row["content_md"],
+        "source_html": row["source_html"],
+        "word_count": row["word_count"],
+        "tags": json.loads(row["tags"]),
+        "created_at": row["created_at"],
+    })
 
 
 @app.delete("/api/clip/{clip_id}")
 def delete_clip(clip_id: str):
-    """删除收藏"""
     with get_db() as db:
         db.execute("DELETE FROM clips WHERE id = ?", (clip_id,))
         db.commit()
@@ -213,7 +206,6 @@ def delete_clip(clip_id: str):
 
 @app.post("/api/clip/{clip_id}/export")
 def export_wechat(clip_id: str):
-    """导出为微信公众号 Markdown"""
     with get_db() as db:
         row = db.execute("SELECT * FROM clips WHERE id = ?", (clip_id,)).fetchone()
     if not row:
@@ -224,7 +216,9 @@ def export_wechat(clip_id: str):
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "clips_count": get_db().execute("SELECT COUNT(*) FROM clips").fetchone()[0]}
+    with get_db() as db:
+        count = db.execute("SELECT COUNT(*) FROM clips").fetchone()[0]
+    return {"status": "ok", "clips_count": count}
 
 
 # ── 启动 ────────────────────────────────────────────────
