@@ -1,132 +1,90 @@
-"""网页内容提取引擎 — 针对性处理各类中文平台"""
-from bs4 import BeautifulSoup
+"""网页内容提取引擎 — 8+ 平台适配"""
 import re
+from bs4 import BeautifulSoup
+
+# 各平台 CSS 选择器（按优先级排列）
+_SELECTORS = {
+    "zhihu.com":    [".RichContent-inner", ".Post-RichText"],
+    "weixin.qq.com":["#js_content", ".rich_media_content"],
+    "mp.weixin.qq.com": ["#js_content", ".rich_media_content"],
+    "csdn.net":     ["#content_views", "article"],
+    "juejin.cn":    ["article.article", ".markdown-body"],
+    "cnblogs.com":  ["#cnblogs_post_body", ".postBody"],
+    "v2ex.com":     [".topic_content", ".post-content"],
+    "medium.com":   ["article"],
+    "github.com":   ["article.markdown-body", ".readme"],
+}
+
+_AD_CLASSES = ["sidebar", "advertisement", "ad-", "recommend", "related-posts", "share-bar"]
+_SKIP_TAGS  = ["script", "style", "nav", "footer", "iframe", "noscript", "header"]
+_TITLE_RE   = re.compile(r'\s*[-–|]\s*(知乎|CSDN|博客园|掘金|简书|V2EX|Medium|Dev\.to).*$')
+_HIDDEN_RE  = re.compile(r"visibility\s*:\s*hidden", re.I)
+
+# 通用候选选择器
+_GENERIC = ["article", "main", ".post-content", ".content", ".post-body", "#content"]
 
 
 def extract_content(html: str, url: str) -> tuple[str, str]:
-    """
-    从 HTML 中提取标题和正文内容
-    返回 (title, cleaned_html)
-    """
+    """返回 (title, cleaned_html)"""
     soup = BeautifulSoup(html, "lxml")
-    
-    # 1. 删除无用标签
-    for tag in soup.find_all(["script", "style", "nav", "footer", "iframe", "noscript"]):
-        tag.decompose()
-    
-    # 2. 移除常见广告/侧边栏（使用单词边界避免误杀）
-    for cls in ["sidebar", "advertisement", "ad-", "recommend", "related-posts", "share-bar"]:
-        for tag in soup.find_all(class_=re.compile(rf"\b{cls}", re.I)):
-            tag.decompose()
-    
-    # 3. 提取标题
+
+    # 1. 删无用标签
+    for t in soup.find_all(_SKIP_TAGS):
+        t.decompose()
+
+    # 2. 去广告
+    for cls in _AD_CLASSES:
+        for t in soup.find_all(class_=re.compile(rf"\b{cls}", re.I)):
+            t.decompose()
+
+    # 3. 标题
     title = ""
     if soup.title:
-        title = soup.title.get_text(strip=True)
-        # 清理标题后缀（| 需要转义）
-        title = re.sub(r'\s*[-–|]\s*(知乎|CSDN|博客园|掘金|简书|V2EX|Medium|Dev\.to).*$', '', title)
-    
-    # 4. 平台特化提取
-    content_html = ""
-    
-    if "zhihu.com" in url:
-        content_html = _extract_zhihu(soup)
-    elif "weixin.qq.com" in url or "mp.weixin.qq.com" in url:
-        content_html = _extract_wechat(soup)
-    elif "csdn.net" in url:
-        content_html = _extract_csdn(soup)
-    elif "juejin.cn" in url:
-        content_html = _extract_juejin(soup)
-    elif "cnblogs.com" in url:
-        content_html = _extract_cnblogs(soup)
-    elif "v2ex.com" in url:
-        content_html = _extract_v2ex(soup)
-    elif "medium.com" in url:
-        content_html = _extract_medium(soup)
-    elif "github.com" in url:
-        content_html = _extract_github(soup)
-    else:
-        content_html = _extract_generic(soup)
-    
-    # 5. 兜底：用正文提取算法（检查提取到的文本内容，而非 HTML 长度）
-    if not content_html or len(BeautifulSoup(content_html, "lxml").get_text(strip=True)) < 100:
-        content_html = _extract_generic(soup)
-    
-    return title, str(content_html)
+        title = _TITLE_RE.sub("", soup.title.get_text(strip=True))
+
+    # 4. 平台特化
+    content = ""
+    for domain, selectors in _SELECTORS.items():
+        if domain in url:
+            content = _try_select(soup, selectors)
+            break
+
+    # 5. 特殊清理
+    if "weixin.qq.com" in url and content:
+        soup2 = BeautifulSoup(content, "lxml")
+        for t in soup2.find_all(style=_HIDDEN_RE):
+            t.decompose()
+        content = str(soup2)
+    if "csdn.net" in url and content:
+        soup2 = BeautifulSoup(content, "lxml")
+        for t in soup2.select(".hide-article-box, .recommend-box"):
+            t.decompose()
+        content = str(soup2)
+
+    # 6. 兜底
+    if not content or len(BeautifulSoup(content, "lxml").get_text(strip=True)) < 100:
+        content = _extract_generic(soup)
+
+    return title, str(content) if content else ""
 
 
-def _extract_zhihu(soup) -> str:
-    """知乎"""
-    content = soup.select_one(".RichContent-inner") or soup.select_one(".Post-RichText")
-    return str(content) if content else ""
-
-
-def _extract_wechat(soup) -> str:
-    """微信公众号"""
-    content = soup.select_one("#js_content") or soup.select_one(".rich_media_content")
-    if content:
-        # 移除隐藏元素
-        for tag in content.find_all(style=re.compile("visibility.*hidden")):
-            tag.decompose()
-    return str(content) if content else ""
-
-
-def _extract_csdn(soup) -> str:
-    """CSDN"""
-    content = soup.select_one("#content_views") or soup.select_one("article")
-    if content:
-        for tag in content.select(".hide-article-box, .recommend-box"):
-            tag.decompose()
-    return str(content) if content else ""
-
-
-def _extract_juejin(soup) -> str:
-    """掘金"""
-    content = soup.select_one("article.article") or soup.select_one(".markdown-body")
-    return str(content) if content else ""
-
-
-def _extract_cnblogs(soup) -> str:
-    """博客园"""
-    content = soup.select_one("#cnblogs_post_body") or soup.select_one(".postBody")
-    return str(content) if content else ""
-
-
-def _extract_v2ex(soup) -> str:
-    """V2EX"""
-    content = soup.select_one(".topic_content") or soup.select_one(".post-content")
-    return str(content) if content else ""
-
-
-def _extract_medium(soup) -> str:
-    """Medium"""
-    content = soup.select_one("article")
-    return str(content) if content else ""
-
-
-def _extract_github(soup) -> str:
-    """GitHub README"""
-    content = soup.select_one("article.markdown-body") or soup.select_one(".readme")
-    return str(content) if content else ""
+def _try_select(soup, selectors):
+    for sel in selectors:
+        el = soup.select_one(sel)
+        if el:
+            return str(el)
+    return ""
 
 
 def _extract_generic(soup) -> str:
-    """通用提取：找最长的文本块"""
-    candidates = []
-    for tag_name in ["article", "main", ".post-content", ".content", ".post-body", "#content"]:
-        if tag_name.startswith(".") or tag_name.startswith("#"):
-            el = soup.select_one(tag_name)
-        else:
-            el = soup.find(tag_name)
+    best = ("", 0)
+    for sel in _GENERIC:
+        el = soup.select_one(sel) if sel.startswith((".", "#")) else soup.find(sel)
         if el:
-            text_len = len(el.get_text(strip=True))
-            if text_len > 100:
-                candidates.append((text_len, el))
-    
-    if candidates:
-        candidates.sort(key=lambda x: -x[0])
-        return str(candidates[0][1])
-    
-    # 最后的兜底：取 body
+            n = len(el.get_text(strip=True))
+            if n > best[1]:
+                best = (str(el), n)
+    if best[1] > 100:
+        return best[0]
     body = soup.find("body")
     return str(body) if body else ""
