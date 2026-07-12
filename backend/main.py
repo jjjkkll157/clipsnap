@@ -20,11 +20,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ── 共享 httpx 客户端（连接池复用） ───────────────────
-_http = httpx.AsyncClient(
-    timeout=15, follow_redirects=True,
-    headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"},
-)
+# ── 共享 httpx 客户端（惰性初始化，避免 import 时创建连接池） ──
+_http = None
+
+
+def _get_http():
+    global _http
+    if _http is None:
+        _http = httpx.AsyncClient(
+            timeout=15, follow_redirects=True,
+            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"},
+        )
+    return _http
 
 # ── 工具函数 ──────────────────────────────────────────
 _CJK = re.compile(r"[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff]")
@@ -96,8 +103,8 @@ def dashboard():
 async def clip_page(request: Request):
     try:
         body = await request.json()
-    except Exception:
-        raise HTTPException(400, "Invalid JSON body")
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        raise HTTPException(400, "Invalid JSON")
 
     url = body.get("url", "")
     html = body.get("html", "")
@@ -110,7 +117,7 @@ async def clip_page(request: Request):
         title, content_html = extract_content(html, url)
     else:
         try:
-            resp = await _http.get(url)
+            resp = await _get_http().get(url)
             resp.raise_for_status()
             title, content_html = extract_content(resp.text, url)
         except httpx.HTTPStatusError as e:

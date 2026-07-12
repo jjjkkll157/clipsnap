@@ -42,9 +42,9 @@ def extract_content(html: str, url: str) -> tuple[str, str]:
     if soup.title:
         title = _TITLE_RE.sub("", soup.title.get_text(strip=True))
 
-    # 4. 平台特化
+    # 4. 平台特化（长域名优先，避免 weixin.qq.com 误匹配 mp.weixin.qq.com）
     content = ""
-    for domain, selectors in _SELECTORS.items():
+    for domain, selectors in sorted(_SELECTORS.items(), key=lambda x: -len(x[0])):
         if domain in url:
             content = _try_select(soup, selectors)
             break
