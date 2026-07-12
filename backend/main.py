@@ -110,7 +110,7 @@ async def clip_page(request: Request):
 
     # 提取内容
     if raw_html:
-        title, content_html = extract_content(raw_html, url, is_raw_html=True)
+        title, content_html = extract_content(raw_html, url)
     else:
         try:
             async with httpx.AsyncClient(

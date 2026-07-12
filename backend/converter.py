@@ -33,11 +33,11 @@ def html_to_markdown(html: str) -> str:
         else:
             img.replace_with(f"[{alt}]")
 
-    # 预处理：链接（过滤 javascript: / # 等无效链接）
+    # 预处理：链接（过滤 javascript: 和无意义的 # 锚点，但保留 #section 类有效锚点）
     for a in soup.find_all("a"):
         href = a.get("href", "")
         text = a.get_text(strip=True)
-        if href and text and not href.startswith(("javascript:", "#")) and href != text:
+        if href and text and href != "#" and not href.startswith("javascript:") and href != text:
             a.replace_with(f"[{text}]({href})")
 
     # 预处理：标题
@@ -117,7 +117,5 @@ def markdown_to_wechat(md: str) -> str:
             result.append(line)
 
     text = "\n".join(result)
-    # 移除多余的代码标记
-    text = re.sub(r'```\w*\n', '', text)
     text = re.sub(r'\n{3,}', '\n\n', text)
     return text.strip()

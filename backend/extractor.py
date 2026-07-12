@@ -3,7 +3,7 @@ from bs4 import BeautifulSoup
 import re
 
 
-def extract_content(html: str, url: str, is_raw_html: bool = False) -> tuple[str, str]:
+def extract_content(html: str, url: str) -> tuple[str, str]:
     """
     从 HTML 中提取标题和正文内容
     返回 (title, cleaned_html)

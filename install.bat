@@ -20,12 +20,12 @@ REM 创建安装目录
 set "INSTALL_DIR=%USERPROFILE%\clipsnap"
 if not exist "%INSTALL_DIR%" mkdir "%INSTALL_DIR%"
 
-REM 复制文件
+REM 复制文件（%~dp0 = 脚本所在目录）
 echo   📦 正在复制文件...
-xcopy /E /Y /Q "backend" "%INSTALL_DIR%\backend\" >nul
-xcopy /E /Y /Q "web" "%INSTALL_DIR%\web\" >nul
-xcopy /E /Y /Q "extension" "%INSTALL_DIR%\extension\" >nul
-copy /Y "README.md" "%INSTALL_DIR%\" >nul
+xcopy /E /Y /Q "%~dp0backend" "%INSTALL_DIR%\backend\" >nul
+xcopy /E /Y /Q "%~dp0web" "%INSTALL_DIR%\web\" >nul
+xcopy /E /Y /Q "%~dp0extension" "%INSTALL_DIR%\extension\" >nul
+copy /Y "%~dp0README.md" "%INSTALL_DIR%\" >nul
 
 REM 安装依赖
 echo   📥 安装 Python 依赖...

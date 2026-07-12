@@ -70,7 +70,7 @@ $btnClip.addEventListener('click', async () => {
 
     const data = await resp.json();
     if (data.ok) {
-      showStatus('success', `✅ 已保存！${data.clip.word_count} 字`);
+      showStatus('success', `✅ 已保存！${data.clip.word_count} 项`);
       $preview.textContent = data.clip.content_md;
       $preview.style.display = 'block';
       // 刷新计数
