@@ -132,15 +132,20 @@ async function copyMD(id) {
   } catch { alert('❌ 复制失败'); }
 }
 
+let _lastQuery = '';
+
+function search() {
+  _lastQuery = document.getElementById('searchInput').value;
+  loadClips(_lastQuery);
+}
+
 async function delClip(id) {
   if (!confirm('确定删除？')) return;
   try {
     await fetch(`${API}/api/clip/${id}`, { method: 'DELETE' });
-    loadClips();
+    loadClips(_lastQuery);
   } catch {}
 }
-
-function search() { loadClips(document.getElementById('searchInput').value); }
 
 function escHtml(s) {
   if (!s) return '';

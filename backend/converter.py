@@ -33,11 +33,11 @@ def html_to_markdown(html: str) -> str:
         else:
             img.replace_with(f"[{alt}]")
 
-    # 预处理：链接
+    # 预处理：链接（过滤 javascript: / # 等无效链接）
     for a in soup.find_all("a"):
         href = a.get("href", "")
         text = a.get_text(strip=True)
-        if href and text and href != text:
+        if href and text and not href.startswith(("javascript:", "#")) and href != text:
             a.replace_with(f"[{text}]({href})")
 
     # 预处理：标题

@@ -48,8 +48,8 @@ def extract_content(html: str, url: str, is_raw_html: bool = False) -> tuple[str
     else:
         content_html = _extract_generic(soup)
     
-    # 5. 兜底：用正文提取算法
-    if not content_html or len(content_html) < 100:
+    # 5. 兜底：用正文提取算法（检查提取到的文本内容，而非 HTML 长度）
+    if not content_html or len(BeautifulSoup(content_html, "lxml").get_text(strip=True)) < 100:
         content_html = _extract_generic(soup)
     
     return title, str(content_html)

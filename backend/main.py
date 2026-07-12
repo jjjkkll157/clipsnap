@@ -10,6 +10,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+import httpx
 
 from extractor import extract_content
 from converter import html_to_markdown, markdown_to_wechat
@@ -31,6 +32,14 @@ def count_words(text: str) -> int:
     cjk = len(_CJK_RE.findall(text))
     latin = len(re.sub(r"[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff]", " ", text).split())
     return cjk + latin
+
+
+def safe_json_loads(s: str, default=None):
+    """安全的 JSON 解析，失败时返回默认值"""
+    try:
+        return json.loads(s)
+    except (json.JSONDecodeError, TypeError):
+        return default if default is not None else []
 
 
 # ── 数据库 ──────────────────────────────────────────────
@@ -66,10 +75,8 @@ init_db()
 
 # ── 静态文件 ────────────────────────────────────────────
 WEB_DIR = Path(__file__).parent.parent / "web"
-_static_mounted = False
 if WEB_DIR.exists():
     app.mount("/static", StaticFiles(directory=str(WEB_DIR)), name="static")
-    _static_mounted = True
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -105,7 +112,6 @@ async def clip_page(request: Request):
     if raw_html:
         title, content_html = extract_content(raw_html, url, is_raw_html=True)
     else:
-        import httpx
         try:
             async with httpx.AsyncClient(
                 timeout=15, follow_redirects=True,
@@ -118,8 +124,6 @@ async def clip_page(request: Request):
             raise HTTPException(502, f"目标网站返回错误: {e.response.status_code}")
         except httpx.RequestError as e:
             raise HTTPException(502, f"无法访问目标网站: {str(e)}")
-        except ImportError:
-            raise HTTPException(500, "httpx is not installed — run: pip install httpx")
 
     # 转 Markdown
     md = html_to_markdown(content_html)
@@ -170,11 +174,11 @@ def list_clips(q: str = "", limit: int = 50, offset: int = 0):
                 "title": r["title"],
                 "content_md": r["content_md"][:500] + ("..." if len(r["content_md"]) > 500 else ""),
                 "word_count": r["word_count"],
-                "tags": json.loads(r["tags"]),
+                "tags": safe_json_loads(r["tags"]),
                 "created_at": r["created_at"],
-            }
-            for r in rows
-        ]
+                }
+                for r in rows
+                ]
     })
 
 
@@ -191,7 +195,7 @@ def get_clip(clip_id: str):
         "content_md": row["content_md"],
         "source_html": row["source_html"],
         "word_count": row["word_count"],
-        "tags": json.loads(row["tags"]),
+        "tags": safe_json_loads(row["tags"]),
         "created_at": row["created_at"],
     })
 
