@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ClipSnap · 我的收藏</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background:#0f0f23; color:#e0e0e0; min-height:100vh; }
+  .topbar { background: linear-gradient(135deg, #667eea, #764ba2); padding:16px 24px; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px; }
+  .topbar h1 { font-size:22px; color:#fff; }
+  .search { display:flex; gap:8px; align-items:center; }
+  .search input { background:rgba(255,255,255,.15); border:1px solid rgba(255,255,255,.3); border-radius:8px; padding:8px 14px; color:#fff; font-size:14px; width:240px; }
+  .search input::placeholder { color:rgba(255,255,255,.5); }
+  .search button { background:rgba(255,255,255,.2); border:none; border-radius:8px; padding:8px 16px; color:#fff; cursor:pointer; font-size:13px; }
+  .stats { padding:12px 24px; background:#1a1a2e; font-size:13px; color:#888; display:flex; gap:20px; }
+  .container { max-width:1000px; margin:0 auto; padding:20px; }
+  .clip-card { background:#1a1a2e; border-radius:12px; padding:16px; margin-bottom:12px; border:1px solid #2a2a3e; transition:border-color .2s; cursor:pointer; }
+  .clip-card:hover { border-color:#667eea; }
+  .clip-card .title { font-size:15px; font-weight:600; margin-bottom:6px; color:#667eea; }
+  .clip-card .meta { font-size:11px; color:#666; display:flex; gap:12px; flex-wrap:wrap; }
+  .clip-card .preview-text { font-size:12px; color:#aaa; margin-top:8px; line-height:1.5; max-height:60px; overflow:hidden; }
+  .clip-card .tags-row { display:flex; gap:6px; margin-top:8px; flex-wrap:wrap; }
+  .tag-badge { background:#2a2a3e; padding:2px 8px; border-radius:8px; font-size:10px; color:#999; }
+  .actions { display:flex; gap:8px; margin-top:10px; }
+  .actions button { background:#2a2a3e; border:none; border-radius:6px; padding:6px 12px; color:#ccc; cursor:pointer; font-size:11px; }
+  .actions button:hover { background:#3a3a4e; }
+  .actions button.danger { color:#ff6b6b; }
+  .modal-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,.7); z-index:100; justify-content:center; align-items:center; }
+  .modal-overlay.show { display:flex; }
+  .modal { background:#1a1a2e; border-radius:16px; padding:24px; max-width:700px; width:90%; max-height:80vh; overflow-y:auto; border:1px solid #3a3a4e; }
+  .modal h2 { color:#667eea; margin-bottom:12px; }
+  .modal .full-content { background:#0d0d1a; border-radius:8px; padding:16px; font-size:13px; font-family:monospace; white-space:pre-wrap; line-height:1.6; }
+  .modal .close-btn { background:#ff6b6b; border:none; border-radius:6px; padding:8px 20px; color:#fff; cursor:pointer; margin-top:16px; float:right; }
+  .empty { text-align:center; padding:60px; color:#555; }
+  .empty p { font-size:14px; margin-top:12px; }
+</style>
+</head>
+<body>
+<div class="topbar">
+  <h1>🖇️ ClipSnap</h1>
+  <div class="search">
+    <input type="text" id="searchInput" placeholder="搜索标题或内容..." onkeyup="if(event.key==='Enter')search()">
+    <button onclick="search()">搜索</button>
+    <button onclick="loadClips()">刷新</button>
+  </div>
+</div>
+<div class="stats">
+  <span id="statsTotal">总计: ... 条</span>
+  <span>API: localhost:8710</span>
+</div>
+<div class="container" id="clipList">
+  <div class="empty"><p>加载中...</p></div>
+</div>
+
+<!-- 详情弹窗 -->
+<div class="modal-overlay" id="modalOverlay">
+  <div class="modal">
+    <h2 id="modalTitle"></h2>
+    <div class="full-content" id="modalContent"></div>
+    <button class="close-btn" onclick="closeModal()">关闭</button>
+  </div>
+</div>
+
+<script>
+const API = 'http://localhost:8710';
+
+async function loadClips(q = '') {
+  const url = q ? `${API}/api/clips?q=${encodeURIComponent(q)}` : `${API}/api/clips`;
+  try {
+    const resp = await fetch(url);
+    const data = await resp.json();
+    document.getElementById('statsTotal').textContent = `总计: ${data.clips.length} 条`;
+    renderClips(data.clips);
+  } catch {
+    document.getElementById('clipList').innerHTML = '<div class="empty"><p>❌ 无法连接后端服务</p><p style="font-size:12px;color:#666">请先运行 backend/main.py</p></div>';
+  }
+}
+
+function renderClips(clips) {
+  const container = document.getElementById('clipList');
+  if (!clips.length) {
+    container.innerHTML = '<div class="empty"><p>📭 还没有收藏，去装 Chrome 扩展开始抓取吧！</p></div>';
+    return;
+  }
+  container.innerHTML = clips.map(c => `
+    <div class="clip-card" onclick="viewClip('${c.id}')">
+      <div class="title">${escHtml(c.title || '(无标题)')}</div>
+      <div class="meta">
+        <span>📝 ${c.word_count} 字</span>
+        <span>📅 ${fmtDate(c.created_at)}</span>
+        <span>🔗 ${escHtml(c.url).substring(0,50)}</span>
+      </div>
+      <div class="preview-text">${escHtml(c.content_md.substring(0,150))}</div>
+      ${c.tags && c.tags.length ? `<div class="tags-row">${c.tags.map(t => `<span class="tag-badge">${escHtml(t)}</span>`).join('')}</div>` : ''}
+      <div class="actions" onclick="event.stopPropagation()">
+        <button onclick="exportWechat('${c.id}')">📱 导出公众号格式</button>
+        <button onclick="copyMD('${c.id}')">📋 复制 Markdown</button>
+        <button class="danger" onclick="delClip('${c.id}')">🗑 删除</button>
+      </div>
+    </div>
+  `).join('');
+}
+
+async function viewClip(id) {
+  try {
+    const resp = await fetch(`${API}/api/clip/${id}`);
+    const c = await resp.json();
+    document.getElementById('modalTitle').textContent = c.title || '(无标题)';
+    document.getElementById('modalContent').textContent = c.content_md;
+    document.getElementById('modalOverlay').classList.add('show');
+  } catch {}
+}
+
+function closeModal() { document.getElementById('modalOverlay').classList.remove('show'); }
+
+async function exportWechat(id) {
+  try {
+    const resp = await fetch(`${API}/api/clip/${id}/export`, { method: 'POST' });
+    const data = await resp.json();
+    await navigator.clipboard.writeText(data.wechat_md);
+    alert('✅ 公众号格式已复制到剪贴板！');
+  } catch { alert('❌ 导出失败'); }
+}
+
+async function copyMD(id) {
+  try {
+    const resp = await fetch(`${API}/api/clip/${id}`);
+    const c = await resp.json();
+    await navigator.clipboard.writeText(c.content_md);
+    alert('✅ Markdown 已复制！');
+  } catch { alert('❌ 复制失败'); }
+}
+
+async function delClip(id) {
+  if (!confirm('确定删除？')) return;
+  try {
+    await fetch(`${API}/api/clip/${id}`, { method: 'DELETE' });
+    loadClips();
+  } catch {}
+}
+
+function search() { loadClips(document.getElementById('searchInput').value); }
+
+function escHtml(s) {
+  if (!s) return '';
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function fmtDate(d) { return d ? d.substring(0,10) : ''; }
+
+// 点击背景关闭弹窗
+document.getElementById('modalOverlay').addEventListener('click', function(e) {
+  if (e.target === this) closeModal();
+});
+
+// 快捷键 ESC 关闭
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
+
+// 启动
+loadClips();
+</script>
+</body>
+</html>
