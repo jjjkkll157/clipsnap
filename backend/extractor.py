@@ -6,7 +6,6 @@ from bs4 import BeautifulSoup
 _SELECTORS = {
     "zhihu.com":    [".RichContent-inner", ".Post-RichText"],
     "weixin.qq.com":["#js_content", ".rich_media_content"],
-    "mp.weixin.qq.com": ["#js_content", ".rich_media_content"],
     "csdn.net":     ["#content_views", "article"],
     "juejin.cn":    ["article.article", ".markdown-body"],
     "cnblogs.com":  ["#cnblogs_post_body", ".postBody"],

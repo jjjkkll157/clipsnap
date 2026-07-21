@@ -12,7 +12,7 @@ import httpx
 from extractor import extract_content
 from converter import html_to_markdown, markdown_to_wechat
 
-app = FastAPI(title="ClipSnap", version="1.0.1")
+app = FastAPI(title="ClipSnap", version="1.0.2")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["chrome-extension://*", "http://localhost:*", "http://127.0.0.1:*"],

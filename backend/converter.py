@@ -36,7 +36,7 @@ def html_to_markdown(html: str) -> str:
     for a in soup.find_all("a"):
         h = a.get("href", "")
         t = a.get_text(strip=True)
-        if h and t and h != "#" and not h.startswith("javascript:") and h != t:
+        if h and t and h != "#" and not h.startswith("javascript:"):
             a.replace_with(f"[{t}]({h})")
 
     # headings (h6→h1 order to avoid nested conflicts)

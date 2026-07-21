@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "ClipSnap - 网页一键转 Markdown",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "点击一下，把任何网页变成干净的 Markdown。支持微信公众号、知乎、CSDN 等平台的智能内容提取。",
   "permissions": ["activeTab", "storage", "scripting"],
   "host_permissions": ["http://localhost:8710/*"],
